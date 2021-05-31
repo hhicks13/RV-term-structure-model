@@ -38,7 +38,7 @@ def neg_log_like(delta,theta,d,beta_d,beta_w,beta_m,alpha_d,alpha_w,alpha_m,_gam
     O = lambda t: d + beta_d*RV_d_t[t] + beta_w*RV_w_t[t] + beta_m*RV_m_t[t] + alpha_d*l_d_t(t) + alpha_w*l_w_t(t) + alpha_m*l_m_t(t)
 
     # must make sure t is not too small (for l_m)
-    terms = lambda t : sum([ (RV_d_t[t]**(delta+k-1)/(theta**(delta+k)*GAMM(delta+k)))*((O(t-1)**(k))/(np.factorial(k))) for k in range(1,90)])
+    terms = lambda t : sum([ (RV_d_t[t]**(delta+k-1)/(theta**(delta+k)*GAMMA(delta+k)))*((O(t-1)**(k))/(np.factorial(k))) for k in range(1,90)])
 
     LL = -sum([(RV_d_t[i]/theta) + O(i-1) for i in range(1,T)]) + sum([ np.log(terms(j)) for j in range(1,T)])
     return -LL
