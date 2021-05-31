@@ -25,11 +25,10 @@ def neg_log_like(delta,theta,d,beta_d,beta_w,beta_m,alpha_d,alpha_w,alpha_m,_gam
     RV_w_t = np.array(RV_w_t[::window])
     RV_m_t = np.array(RV_m_t[::window])
     GAMMA = lambda x : factorial(x-1)
-    
     T = len(RV_d_t)
     epsilon = np.random.normal(0,1,size=len(RV_d_t))
+    
     # leverage terms
-    mpd = 24*60
     l_d = lambda t : (epsilon[t] - _gamma*np.sqrt(RV_d_t[t]))^2
     l_w = lambda t : (1/6)*sum([l_d(t - i) for i in range(1,7)])
     l_m = lambda t : (1/24)*sum([l_d(t- i) for i in range(1,30)])
