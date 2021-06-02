@@ -11,6 +11,7 @@ import numba as nb
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
+import itertools as it
 
 #init
 np.random.seed(0)
@@ -28,71 +29,6 @@ RV_m = np.array(1)
 #
 # as long as function is defined with numpy, gradient is attainable
 #
-def neg_log_like(params):
-    global RV_d
-    global RV_w
-    global RV_m
-    
-    delta = params[0]
-    theta = params[1]
-    d = params[2]
-    beta_d = params[3]
-    beta_w = params[4]
-    beta_m = params[5]
-    alpha_d = params[6]
-    alpha_w = params[7]
-    alpha_m = params[8]
-    gamma = params[9]
-    
-    T = len(RV_d)
-    epsilon = np.random.normal(0,1,size=len(RV_d))
-    
-    # leverage terms
-    def l_d(t):
-        return (epsilon[t] - gamma*np.sqrt(RV_d[t]))**2
-    
-    # leverage term weekly
-    def l_w(t):
-        l_w = 0
-        for i in range(1,7):
-            l_w += l_d(t-i)
-        return (1/6)*l_w
-    
-    # leverage term monthly 
-    def l_m(t):
-        l_m = 0
-        for i in range(24,30):
-            l_m+=l_d(t-i)
-        return (1/24)*l_m
-
-    # Linear Terms
-    def O(t):
-        return d + beta_d*RV_d[t] + beta_w*RV_w[t] + beta_m*RV_m[t] + alpha_d*l_d(t) + alpha_w*l_w(t) + alpha_m*l_m(t)
-    
-    # Left term of likelihood function
-    f0 = 0
-    for i in range(31,T):
-        f0 = RV_d[i]/theta + O(i-1)
-
-    # Right Inner term of likelihood function
-    def f2(t):
-        f1 = 0
-        for k in range(1,90):
-            A = RV_d[t]**(delta+k-1)
-            B = (theta**(delta+k))*(factorial(delta+k-1))
-            C = O(t-1)**(k)
-            D = factorial(k)
-            f1 += (A/B)*(C/D)
-        return f1
-
-    # Right Outer term of likelihood function
-    f3 = 0
-    for j in range(31,T):
-        f3 += np.log(f2(j))
-
-    LL = -f0 + f3
-    return -LL
-
 
 #
 #
@@ -142,23 +78,138 @@ def main():
     # sanity check
     assert len(RV_d) == len(RV_w) == len(RV_m), "lengths are incorrect"
 
-    #
-    # MLE gradient
-    #
+    #T = len(RV_d)
+    T = 41
+    epsilon = np.random.normal(0,1,size=len(RV_d))
+    truncation = 15
 
+    # leverage terms
+    def l_d(t,gamma):
+        return (epsilon[t] - gamma*np.sqrt(RV_d[t]))**2
+    
+    # leverage term weekly
+    def l_w(t,gamma):
+        l_w = 0
+        for i in range(1,7):
+            l_w += l_d(t-i,gamma)
+        return (1/6)*l_w
+    
+    # leverage term monthly 
+    def l_m(t,gamma):
+        l_m = 0
+        for i in range(24,30):
+            l_m+=l_d(t-i,gamma)
+        return (1/24)*l_m
+
+    # heterogenous parameter
+    def O(t,beta_d,beta_w,beta_m,alpha_d,alpha_w,alpha_m,gamma):
+        # parabolic leverage assumption
+        d = 0
+        return d + beta_d*RV_d[t] + beta_w*RV_w[t] + beta_m*RV_m[t] + alpha_d*l_d(t,gamma) + alpha_w*l_w(t,gamma) + alpha_m*l_m(t,gamma)
+
+    #
+    # factorial which can be used by autograd
+    #
+    def _factorial(n):
+        val=1
+        while n>=1:
+            val = val * n
+            n = n-1
+        return  val
+
+    #
+    # inner term on right side of likelihood equation
+    #
+    def f2(t,delta,theta,beta_d,beta_w,beta_m,alpha_d,alpha_w,alpha_m,gamma):
+        f1 = 0
+        d = 0
+        for k in range(1,truncation):
+            A = np.power(RV_d[t],(delta+k-1))
+            B = np.power(theta,delta+k)*_factorial(delta+k-1)
+            C = np.power(d + beta_d*RV_d[t] + beta_w*RV_w[t] + beta_m*RV_m[t] + alpha_d*l_d(t,gamma) + alpha_w*l_w(t,gamma) + alpha_m*l_m(t,gamma),k)
+            D = factorial(k)
+            f1 += (A/B)*(C/D)
+        return f1
+
+    #
+    # MLE
+    #
+    def neg_log_like(params):    
+        theta = params[0]
+        delta = params[1]
+        beta_d  = params[2]
+        beta_w = params[3]
+        beta_m = params[4]
+        alpha_d = params[5]
+        alpha_w = params[6]
+        alpha_m = params[7]
+        gamma = params[8]
+        # parabolic leverage assumption (P-LHARG)
+        d = 0
+        # leverage terms
+        # Linear Terms
+        # Left term of likelihood function
+        f0 = 0
+        T = 40
+        for i in range(T,T+1000):
+            f0 += RV_d[i]/theta + d + beta_d*RV_d[i-1] + beta_w*RV_w[i-1] + beta_m*RV_m[i-1] + alpha_d*l_d(i-1,gamma) + alpha_w*l_w(i-1,gamma) + alpha_m*l_m(i-1,gamma)
+        
+        # Right Outer term of likelihood function
+        f3 = 0
+        for j in range(T,T+1000):
+            f3 += np.log(f2(j-1,delta,theta,beta_d,beta_w,beta_m,alpha_d,alpha_w,alpha_m,gamma))
+
+        LL = -f0 + f3
+        return -LL
+    
     # number of parameters
-    syms = ['delta','theta','d','beta_d','beta_w','beta_m','alpha_d','alpha_w','alpha_m','gamma']
+    syms = ['theta','delta','beta_d','beta_w','beta_m','alpha_d','alpha_w','alpha_m','gamma']
     K = 10
+    print("Truncation: ",truncation)
+    print("T: ",T)
+    print("<><><> jacobian calculation")
     _jacobian = jacobian(neg_log_like)
+    print("<><><> jacobian computed")
     _hessian = hessian(neg_log_like)
-    param_start = np.append(np.ones(K-1),1.0)
-    result1 = minimize(neg_log_like, param_start, method = 'BFGS',options={'disp': False}, jac = _jacobian)
-    print("Convergence? ", result1.success)
-    print("Num Evals: ", result1.nfev)
-    print("")
-    for i,sym in enumerate(syms):
-        print(f"{sym :<10} ~ ~ ~ ~ {param_start[i]:>20.3f}")
-    print("")
+
+    #
+    # try grid of points 
+    #
+    scales = [1e00,1e01,1e02,1e03]
+    test_points = [point for point in it.product(scales,repeat=9)]
+    min_val = neg_log_like(test_points[0])
+    min_candidate = test_points[0]
+    print("first test",min_candidate)
+    for i,point in enumerate(test_points):
+        print(f"testing {i}/{len(test_points)}       min_val: {min_val}, min_candidate: {min_candidate}")
+        cur_val = neg_log_like(point)
+        if cur_val < min_val:
+            min_candidate = point
+            min_val = cur_val
+
+    print(min_candidate)
+    print(min_val)
+
+
+    print("number of test points",len(test_points))
+
+    
+    #param_start = np.array([1.068e-002,
+    #                        1.243e000,
+    #                        2.429e004,
+    #                        2.317e004,
+    #                        1.322e04,
+    #                        2.376e-001,
+    #                        1.194e-001,
+    #                        3.85e-001,
+    #                        2.237e002])
+    #result1 = minimize(neg_log_like, param_start, method = 'Newton-CG',options={'disp': True}, jac = _jacobian)
+    #print("Convergence? ", result1.success)
+    #print("Num Evals: ", result1.nfev)
+    #print("")
+    #for i,x in enumerate(result1.x):
+    #    print(f"{syms[i] :<10} ~ ~ ~ ~ {x:>20.3f}")
+    #print("")
 
 
 
